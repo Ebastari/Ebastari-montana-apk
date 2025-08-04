@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Monitoring Tanaman PT Energi Batubara Lestari</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/exceljs/dist/exceljs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+<style>
+  body { font-family: Arial, sans-serif; background: #f3f4f6; padding: 10px; margin: 0; }
+  h1 { text-align: center; color: #2d3748; margin-bottom: 16px; }
+  .container { max-width: 100%; background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); margin-bottom: 30px; }
+  .form-group { margin-bottom: 12px; }
+  label { display: block; margin-bottom: 6px; font-size: 1rem; }
+  input, select, button { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; }
+  .review-foto { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px; margin-top: 10px; }
+  .review-foto img { width: 100%; border-radius: 8px; border: 1px solid #ccc; }
+  .download-links { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
+  .download-links a { padding: 10px; text-align: center; background: #2563eb; color: #fff; text-decoration: none; border-radius: 6px; }
+
+  /* Kamera seperti aplikasi HP */
+  .camera-container {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    background: black;
+    overflow: hidden;
+  }
+
+  #video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  #btnCapture {
+    position: absolute;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    background: white;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(0,0,0,0.3);
+  }
+</style>
+
+ </head>
+<body>
+  <div class="container">
+    <h1>Monitoring Tanaman Reklamasi PT Energi Batubara Lestari</h1>
+    <div class="form-group">
+      <label for="cameraSelect">Pilih Kamera</label>
+      <select id="cameraSelect"></select>
+      <button onclick="switchCamera()">Ganti Kamera</button>
+    </div>
+    <div class="form-group"><label for="tinggi">Tinggi Tanaman (cm)</label><input type="number" id="tinggi" placeholder="Contoh: 120"></div>
+    </div>
+    <div class="form-group"><label for="lokasi">Lokasi</label><input type="text" id="lokasi"></div>
+    <div class="form-group"><label for="tahun">Tahun Tanam</label><input type="number" id="tahun"></div>
+    <div class="form-group"><label for="jenis">Jenis Tanaman</label><input type="text" id="jenis"></div>
+    <div class="form-group"><label for="tim">Tim Pekerja</label><input type="text" id="tim"></div>
+    <div class="form-group">
+      <button onclick="ambilGPS()">Ambil Koordinat GPS</button>
+      <div id="gpsInfo" class="gps-info">Belum ada data GPS</div>
+    </div>
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas" style="display: none;"></canvas>
+    <audio id="shutterSound" src="https://www.soundjay.com/mechanical/camera-shutter-click-03.mp3" preload="auto"></audio>
+    <div class="camera-container">
+  <video id="video" autoplay playsinline></video>
+  <button id="btnCapture" onclick="capturePhoto()"></button>
+</div>
+    <div id="reviewFoto" class="review-foto"></div>
+    <table id="dataTable" border="1" style="width:100%; margin-top:20px;">
+  <thead>
+    <tr>
+      <th>No</th><th>Tinggi</th><th>Lokasi</th><th>Tahun</th>
+      <th>Jenis</th><th>Tim</th><th>Tanggal</th><th>Aksi</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+<div style="margin-top:10px;">
+  <button onclick="prevPage()">Sebelumnya</button>
+  <span id="pageInfo"></span>
+  <button onclick="nextPage()">Berikutnya</button>
+</div>
+
+
+    <div class="download-links"
+    ><a href="#" onclick="resetData()">Reset Data</a>
+      <a href="#" onclick="downloadExcelWithImages()">Download Excel</a>
+      <a href="#" onclick="downloadPDF()">Download PDF</a>
+      <a href="#" onclick="downloadKMZ()">Download KMZ</a>
+      <a href="#" onclick="sendToWhatsApp()">Kirim WhatsApp</a>
+    </div>
+  </div>
+  <script>
+    let data = JSON.parse(localStorage.getItem('monitoringData') || '[]');
+    let currentStream = null, currentDeviceId = null;
+    let lastGPS = { koordinat: "0,0", akurasi: "Tidak tersedia" };
+    let currentPage = 1;
+    const itemsPerPage = 10;
+
+    function ambilGPS() {
+      const gpsInfo = document.getElementById('gpsInfo');
+      gpsInfo.textContent = "Mengambil lokasi...";
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(pos => {
+          const lat = pos.coords.latitude.toFixed(6);
+          const lon = pos.coords.longitude.toFixed(6);
+          const acc = pos.coords.accuracy.toFixed(2);
+          lastGPS = { koordinat: `${lat},${lon}`, akurasi: acc };
+          gpsInfo.textContent = `Koordinat: ${lat},${lon} (±${acc} m)`;
+        }, () => gpsInfo.textContent = "Gagal mengambil GPS", { enableHighAccuracy: true });
+      } else gpsInfo.textContent = "Geolocation tidak didukung";
+    }
+
+  async function listCameras() {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoDevices = devices.filter(d => d.kind === 'videoinput');
+    const select = document.getElementById('cameraSelect');
+    select.innerHTML = '';
+    videoDevices.forEach(d => {
+      const option = document.createElement('option');
+      option.value = d.deviceId;
+      option.text = d.label || 'Kamera';
+      select.appendChild(option);
+    });
+    if (videoDevices.length) startCamera(videoDevices[0].deviceId);
+  }
+  async function startCamera(deviceId) {
+    if (currentStream) currentStream.getTracks().forEach(track => track.stop());
+    try {
+      const constraints = deviceId ? { video: { deviceId: { exact: deviceId } } } : { video: { facingMode: 'environment' } };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      document.getElementById('video').srcObject = stream;
+      currentStream = stream;
+    } catch (err) { alert('Gagal mengakses kamera: ' + err.message); }
+  }
+  function switchCamera() {
+    const selectedDeviceId = document.getElementById('cameraSelect').value;
+    startCamera(selectedDeviceId);
+  }
+  function capturePhoto() {
+    document.getElementById('shutterSound').play();
+    const tinggi = document.getElementById('tinggi').value;
+    const lokasi = document.getElementById('lokasi').value;
+    const tahun = document.getElementById('tahun').value;
+    const jenis = document.getElementById('jenis').value;
+    const tim = document.getElementById('tim').value;
+    const tanggal = new Date().toLocaleString();
+
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+    ctx.fillStyle = 'white';
+    ctx.font = '20px sans-serif';
+    ctx.fillText(`Lokasi: ${lokasi}`, 10, 30);
+    ctx.fillText(`Tinggi: ${tinggi} cm`, 10, 60);
+    ctx.fillText(`Jenis: ${jenis}`, 10, 90);
+    ctx.fillText(`Tim: ${tim}`, 10, 120);
+    ctx.fillText(`Koordinat: ${lastGPS.koordinat}`, 10, 150);
+    ctx.fillText(`Akurasi: ±${lastGPS.akurasi} m`, 10, 180);
+    ctx.fillText(`Tanggal: ${tanggal}`, 10, 210);
+    ctx.fillText(`GPS Batch: ${data.length + 1}`, 10, 240);
+
+    const gambar = canvas.toDataURL('image/png');
+    data.push({ gambar, tinggi, lokasi, tahun, jenis, tim, koordinat: lastGPS.koordinat, akurasi: lastGPS.akurasi, tanggal });
+    renderReview();
+    renderTable(); 
+    if (data.length % 8 === 0) batchDownload();
+  }
+  function renderReview() {
+    const review = document.getElementById('reviewFoto');
+    review.innerHTML = '';
+    const recent = data.slice(-8);
+    recent.forEach(d => {
+      const img = document.createElement('img');
+      img.src = d.gambar;
+      review.appendChild(img);
+    });
+  }
+  async function batchDownload() {
+    const recent = data.slice(-8);
+    const zip = new JSZip();
+    recent.forEach((d,i) => zip.file(`foto_${i+1}.png`, d.gambar.split(',')[1], { base64: true }));
+    const csv = recent.map((d,i) => `${i+1},${d.tinggi},${d.lokasi},${d.tahun},${d.jenis},${d.tim},${d.koordinat},${d.akurasi},${d.tanggal}`).join("\n");
+    zip.file("data.csv", csv);
+    const kmz = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document>${recent.map(d => `<Placemark><name>${d.jenis}</name><description>${d.lokasi}</description><Point><coordinates>${d.koordinat.replace(',',',0')}</coordinates></Point></Placemark>`).join('')}</Document></kml>`;
+    zip.file("data.kmz", kmz);
+    const blob = await zip.generateAsync({ type: "blob" });
+    saveAs(blob, `batch_${data.length-7}-${data.length}.zip`);
+  }
+ // Render tabel dengan pagination dan edit tinggi
+  function renderTable() {
+    const tbody = document.querySelector('#dataTable tbody');
+    tbody.innerHTML = '';
+
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const pageData = data.slice(startIndex, startIndex + itemsPerPage);
+
+    pageData.forEach((item, i) => {
+      const tr = document.createElement('tr');
+      tr.dataset.index = startIndex + i;
+
+      tr.innerHTML = `
+        <td>${startIndex + i + 1}</td>
+        <td class="td-tinggi">${item.tinggi}</td>
+        <td>${item.lokasi}</td>
+        <td>${item.tahun}</td>
+        <td>${item.jenis}</td>
+        <td>${item.tim}</td>
+        <td>${item.tanggal}</td>
+        <td class="aksi-cell">
+          <button class="btn-edit" onclick="startEdit(this)">Edit</button>
+        </td>
+      `;
+
+      tbody.appendChild(tr);
+    });
+
+    document.getElementById('pageInfo').textContent = `Halaman ${currentPage} dari ${Math.max(1, Math.ceil(data.length / itemsPerPage))}`;
+  }
+
+  // Fungsi start edit pada baris tertentu
+  function startEdit(button) {
+    const tr = button.closest('tr');
+    const index = parseInt(tr.dataset.index);
+    const tinggiCell = tr.querySelector('.td-tinggi');
+    const aksiCell = tr.querySelector('.aksi-cell');
+    const currentTinggi = data[index].tinggi;
+
+    // Ganti cell tinggi dengan input
+    tinggiCell.innerHTML = `<input type="number" class="edit-input" value="${currentTinggi}" min="0" />`;
+
+    // Ganti tombol edit dengan tombol save dan cancel
+    aksiCell.innerHTML = `
+      <button class="btn-save" onclick="saveEdit(this)">Simpan</button>
+      <button class="btn-cancel" onclick="cancelEdit(this)">Batal</button>
+    `;
+  }
+
+  // Fungsi simpan hasil edit
+  function saveEdit(button) {
+    const tr = button.closest('tr');
+    const index = parseInt(tr.dataset.index);
+    const input = tr.querySelector('.edit-input');
+    const newTinggi = input.value.trim();
+
+    if (newTinggi === '' || isNaN(newTinggi) || Number(newTinggi) < 0) {
+      alert('Masukkan nilai tinggi yang valid (0 atau lebih)!');
+      return;
+    }
+
+    data[index].tinggi = newTinggi;
+    saveData();
+    alert('Data berhasil diperbarui!');
+
+    renderTable();
+  }
+
+  // Fungsi batal edit
+  function cancelEdit(button) {
+    renderTable();
+  }
+
+  function nextPage() {
+    if (currentPage < Math.ceil(data.length / itemsPerPage)) {
+      currentPage++;
+      renderTable();
+    }
+  }
+  function prevPage() {
+    if (currentPage > 1) {
+      currentPage--;
+      renderTable();
+    }
+  }
+
+  // Fungsi download Excel dengan gambar, PDF, ZIP, KMZ dan kirim WA
+  async function downloadExcelWithImages() {
+    if (data.length === 0) {
+      alert("Tidak ada data untuk diunduh.");
+      return;
+    }
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Monitoring');
+    sheet.columns = [
+      { header: 'Tanggal', key: 'tanggal', width: 20 },
+      { header: 'Lokasi', key: 'lokasi', width: 15 },
+      { header: 'Jenis', key: 'jenis', width: 15 },
+      { header: 'Tim', key: 'tim', width: 15 },
+      { header: 'Tinggi (cm)', key: 'tinggi', width: 12 },
+      { header: 'Tahun Tanam', key: 'tahun', width: 12 },
+      { header: 'Koordinat', key: 'koordinat', width: 20 },
+      { header: 'Akurasi (m)', key: 'akurasi', width: 12 },
+      { header: 'Gambar', key: 'gambar', width: 15 }
+    ];
+    for (let i = 0; i < data.length; i++) {
+      const d = data[i];
+      sheet.addRow({
+        tanggal: d.tanggal,
+        lokasi: d.lokasi,
+        jenis: d.jenis,
+        tim: d.tim,
+        tinggi: d.tinggi,
+        tahun: d.tahun,
+        koordinat: d.koordinat,
+        akurasi: d.akurasi
+      });
+      const imageId = workbook.addImage({ base64: d.gambar, extension: 'png' });
+      sheet.addImage(imageId, { tl: { col: 8, row: i+1 }, ext: { width: 100, height: 100 } });
+    }
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveAs(new Blob([buffer]), "monitoring_tanaman.xlsx");
+  }
+async function downloadPDF() {
+  if (data.length === 0) {
+    alert("Tidak ada data untuk diunduh.");
+    return;
+  }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape' });
+
+  // Judul laporan
+  doc.setFontSize(16);
+  doc.text("Laporan Monitoring Tanaman", 14, 15);
+
+  // Siapkan data tabel
+  const rows = data.map((d, i) => [
+    i + 1,
+    d.tinggi,
+    d.lokasi,
+    d.tahun,
+    d.jenis,
+    d.tim,
+    d.tanggal,
+    '' // Placeholder untuk gambar
+  ]);
+
+  // Buat tabel
+  doc.autoTable({
+    head: [['No', 'Tinggi (cm)', 'Lokasi', 'Tahun', 'Jenis', 'Tim', 'Tanggal', 'Gambar']],
+    body: rows,
+    startY: 25,
+    styles: {
+      fontSize: 10,
+      cellPadding: 3,
+      halign: 'center',
+      valign: 'middle'
+    },
+    headStyles: {
+      fillColor: [37, 99, 235],
+      textColor: [255, 255, 255],
+      fontSize: 11,
+      fontStyle: 'bold'
+    },
+    columnStyles: {
+      0: { cellWidth: 12 },
+      1: { cellWidth: 25 },
+      2: { cellWidth: 40 },
+      3: { cellWidth: 25 },
+      4: { cellWidth: 40 },
+      5: { cellWidth: 40 },
+      6: { cellWidth: 45 },
+      7: { cellWidth: 80 } // Kolom gambar diperbesar
+    },
+    didDrawCell: function (dataCell) {
+      // Hanya gambar di bagian body, bukan di header
+      if (dataCell.section === 'body' && dataCell.column.index === 7) {
+        const imgData = data[dataCell.row.index].gambar;
+        if (imgData) {
+          // Perbesar gambar agar lebih proporsional
+          const cellWidth = dataCell.cell.width;
+          const cellHeight = dataCell.cell.height;
+          const imgSize = Math.min(cellWidth, cellHeight);
+
+          // Posisikan gambar di tengah sel
+          const xOffset = dataCell.cell.x + (cellWidth - imgSize) / 2;
+          const yOffset = dataCell.cell.y + (cellHeight - imgSize) / 2;
+
+          doc.addImage(imgData, 'PNG', xOffset, yOffset, imgSize, imgSize);
+        }
+      }
+    }
+  });
+
+  // Nama file PDF berdasarkan tanggal foto pertama
+  let fileDate = data[0].tanggal.split(' ')[0];
+  fileDate = fileDate.replace(/[^\d-]/g, '_');
+
+  doc.save(`monitoring_tanaman_${fileDate}.pdf`);
+}
+
+
+  async function downloadZIP(){
+      const zip=new JSZip();
+      let csv="Tanggal,Lokasi,Tahun,Jenis,Tim,Tinggi,Koordinat,Akurasi\n";
+      data.forEach(d=>{ csv+=`${d.tanggal},${d.lokasi},${d.tahun},${d.jenis},${d.tim},${d.tinggi},${d.koordinat},${d.akurasi}\n`; });
+      zip.file("data.csv",csv);
+      data.forEach((d,i)=>{ zip.file(`gambar_${i+1}.png`,d.gambar.split(',')[1],{base64:true}); });
+      zip.generateAsync({type:"blob"}).then(content=>saveAs(content,"monitoring.zip"));
+    }
+
+    async function downloadKMZ(){
+      let kml=`<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document>\n`;
+      data.forEach((d,i)=>{ const [lat,lon]=d.koordinat.split(','); kml+=`<Placemark>\n<name>${d.lokasi} - ${d.jenis}</name>\n<description><![CDATA[<img src="files/gambar_${i+1}.png" width="300"/>]]></description>\n<Point><coordinates>${lon},${lat},0</coordinates></Point>\n</Placemark>\n`; });
+      kml+=`</Document>\n</kml>`;
+      const zip=new JSZip();
+      zip.file("doc.kml",kml);
+      data.forEach((d,i)=>{ zip.file(`files/gambar_${i+1}.png`,d.gambar.split(',')[1],{base64:true}); });
+      zip.generateAsync({type:"blob"}).then(content=>saveAs(content,"monitoring.kmz"));
+    }
+
+    function sendToWhatsApp(){
+      if(data.length===0){ alert("Tidak ada data untuk dikirim."); return; }
+      const wa="6281122220044";
+      let msg="Monitoring Tanaman\n";
+      data.forEach((d,i)=>{ msg+=`${i+1}. ${d.tanggal} - ${d.lokasi} (${d.jenis}) Tinggi: ${d.tinggi} cm\n`; });
+      const encoded=encodeURIComponent(msg);
+      const url=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+        ? `https://wa.me/${wa}?text=${encoded}`
+        : `https://web.whatsapp.com/send?phone=${wa}&text=${encoded}`;
+      window.open(url,"_blank");
+    }
+
+    function resetData(){ if(confirm('Hapus semua data?')){ data=[]; localStorage.removeItem('monitoringData'); renderTable(); } }
+
+   function saveData() {
+  localStorage.setItem('monitoringData', JSON.stringify(data));
+}
+function loadData() {
+  const stored = localStorage.getItem('monitoringData');
+  if (stored) data = JSON.parse(stored);
+}
+loadData();
+
+listCameras();
+renderTable();
+  </script>
+</body>
+</html>
+
+
